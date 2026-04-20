@@ -1,0 +1,13 @@
+{
+  "generated_at": null,
+  "scan_summary": {
+    "total_scanned": 0,
+    "go": 0,
+    "conditional": 0,
+    "no_go": 0
+  },
+  "go_targets": [],
+  "no_go": [],
+  "benchmark_awards": [],
+  "incumbent_vendors": []
+}

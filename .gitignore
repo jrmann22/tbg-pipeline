@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+fix_dashboard.ps1
+inject_pipeline.ps1
+chartjs-4.4.0.min.js
