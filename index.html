@@ -99,10 +99,12 @@
           <th>NAICS</th>
           <th>Set-Aside</th>
           <th>Score</th>
+          <th>Site Visit</th>
+          <th>Q&amp;A / RFI</th>
           <th>Due</th>
         </tr>
       </thead>
-      <tbody id="body-targets"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+      <tbody id="body-targets"><tr><td colspan="9" class="empty">Loading…</td></tr></tbody>
     </table>
   </div>
 
@@ -192,10 +194,22 @@ function badge(verdict) {
   return `<span class="badge badge-${verdict}">${label}</span>`;
 }
 
+function dateCell(iso, warnIfPast) {
+  if (!iso) return '—';
+  const d = daysLeft(iso);
+  let extra = '';
+  if (d !== null) {
+    if (d < 0) extra = ` <span style="color:#f85149;font-size:.65rem">PAST</span>`;
+    else if (d <= 3) extra = ` <span style="color:#f85149;font-weight:700">${d}d</span>`;
+    else if (d <= 7) extra = ` <span style="color:#d29922">${d}d</span>`;
+  }
+  return fmtDate(iso) + extra;
+}
+
 function renderTargets(targets) {
   const tbody = $id('body-targets');
   if (!targets || !targets.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty">No active targets today.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="empty">No active targets today.</td></tr>';
     return;
   }
   tbody.innerHTML = targets.map(t => {
@@ -206,12 +220,16 @@ function renderTargets(targets) {
       : t.name;
     const color = scoreColor(t.score);
     const pct = Math.max(4, t.score);
+    const svWarn = t.site_visit_warning
+      ? `<div style="font-size:.7rem;color:#d29922;margin-top:.2rem">⚠ ${t.site_visit_warning}</div>`
+      : '';
     return `<tr>
       <td>${badge(t.verdict)}${teamTag}${priorityTag}</td>
       <td>
         ${nameCell}
         ${t.reason_summary ? `<div class="reason">${t.reason_summary}</div>` : ''}
         ${t.recommended_action ? `<div class="action">→ ${t.recommended_action}</div>` : ''}
+        ${svWarn}
       </td>
       <td style="white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis">${t.agency || '—'}</td>
       <td style="font-size:.75rem;color:#8b949e">${t.naics || '—'}</td>
@@ -222,6 +240,8 @@ function renderTargets(targets) {
           <div class="bar"><div class="fill" style="width:${pct}%;background:${color}"></div></div>
         </div>
       </td>
+      <td style="white-space:nowrap;font-size:.8rem">${dateCell(t.site_visit_date)}</td>
+      <td style="white-space:nowrap;font-size:.8rem">${dateCell(t.qa_rfi_date)}</td>
       <td style="white-space:nowrap">${fmtDate(t.due_date)}${urgencyTag(t.due_date)}</td>
     </tr>`;
   }).join('');
