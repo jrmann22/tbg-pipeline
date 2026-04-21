@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TBG Federal Pipeline Dashboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0f1117; color: #e1e4e8; min-height: 100vh; }
+
+    header { background: #161b22; border-bottom: 1px solid #30363d; padding: 1.25rem 2rem; display: flex; align-items: center; justify-content: space-between; }
+    header h1 { font-size: 1.1rem; font-weight: 600; letter-spacing: .02em; }
+    header h1 span { color: #58a6ff; }
+    #generated-at { font-size: .75rem; color: #8b949e; }
+
+    .container { max-width: 1200px; margin: 0 auto; padding: 1.5rem 2rem; }
+
+    /* Digest bar */
+    .digest { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1rem; margin-bottom: 2rem; }
+    .digest-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 1.25rem; text-align: center; }
+    .digest-card .num { font-size: 2rem; font-weight: 700; line-height: 1; }
+    .digest-card .label { font-size: .75rem; color: #8b949e; margin-top: .35rem; text-transform: uppercase; letter-spacing: .05em; }
+    .num.go { color: #3fb950; }
+    .num.watch { color: #d29922; }
+    .num.teaming { color: #a371f7; }
+    .num.nogo { color: #f85149; }
+    .num.forecast { color: #58a6ff; }
+
+    /* Section headers */
+    h2 { font-size: .85rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: #8b949e; margin: 2rem 0 .75rem; padding-bottom: .5rem; border-bottom: 1px solid #21262d; }
+
+    /* Tables */
+    .tbl-wrap { overflow-x: auto; border-radius: 8px; border: 1px solid #30363d; }
+    table { width: 100%; border-collapse: collapse; font-size: .825rem; }
+    th { background: #161b22; color: #8b949e; font-weight: 500; text-transform: uppercase; font-size: .7rem; letter-spacing: .06em; padding: .65rem 1rem; text-align: left; border-bottom: 1px solid #30363d; white-space: nowrap; }
+    td { padding: .65rem 1rem; border-bottom: 1px solid #21262d; vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #161b22; }
+
+    /* Verdict badges */
+    .badge { display: inline-block; padding: .2rem .55rem; border-radius: 4px; font-size: .7rem; font-weight: 600; letter-spacing: .04em; white-space: nowrap; }
+    .badge-GO { background: #1a4731; color: #3fb950; border: 1px solid #2ea043; }
+    .badge-WATCH { background: #3d2e00; color: #d29922; border: 1px solid #9e6a03; }
+    .badge-WATCH_TEAMING { background: #2d1f63; color: #a371f7; border: 1px solid #6e40c9; }
+    .badge-NO-GO { background: #3d0f0f; color: #f85149; border: 1px solid #da3633; }
+
+    a { color: #58a6ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .score-bar { display: flex; align-items: center; gap: .5rem; }
+    .score-bar .bar { height: 6px; border-radius: 3px; background: #21262d; flex: 1; max-width: 80px; }
+    .score-bar .fill { height: 100%; border-radius: 3px; transition: width .3s; }
+
+    .tag { display: inline-block; padding: .15rem .4rem; border-radius: 3px; font-size: .65rem; font-weight: 600; margin-left: .3rem; }
+    .tag-team { background: #2d1f63; color: #a371f7; }
+    .tag-priority { background: #0d1117; color: #58a6ff; border: 1px solid #30363d; }
+
+    .reason { font-size: .75rem; color: #8b949e; margin-top: .2rem; line-height: 1.4; }
+    .action { font-size: .75rem; color: #3fb950; margin-top: .2rem; }
+
+    .empty { padding: 2rem; text-align: center; color: #484f58; font-size: .875rem; }
+
+    /* Agency scoreboard */
+    .scoreboard { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; }
+    .agency-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 1rem; }
+    .agency-card h3 { font-size: .8rem; color: #58a6ff; margin-bottom: .75rem; line-height: 1.3; }
+    .agency-card .row { display: flex; justify-content: space-between; font-size: .75rem; padding: .2rem 0; }
+    .agency-card .row .val { font-weight: 600; }
+
+    footer { text-align: center; padding: 2rem; font-size: .7rem; color: #484f58; border-top: 1px solid #21262d; margin-top: 3rem; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>The Blackshear Group — <span>Federal Pipeline Dashboard</span></h1>
+  <span id="generated-at">Loading…</span>
+</header>
+
+<div class="container">
+
+  <!-- Digest -->
+  <div class="digest">
+    <div class="digest-card"><div class="num go" id="cnt-go">—</div><div class="label">Go</div></div>
+    <div class="digest-card"><div class="num watch" id="cnt-watch">—</div><div class="label">Watch</div></div>
+    <div class="digest-card"><div class="num teaming" id="cnt-teaming">—</div><div class="label">Teaming</div></div>
+    <div class="digest-card"><div class="num nogo" id="cnt-nogo">—</div><div class="label">No-Go</div></div>
+    <div class="digest-card"><div class="num forecast" id="cnt-forecast">—</div><div class="label">Forecast</div></div>
+  </div>
+
+  <!-- Active Targets -->
+  <h2>Active Targets</h2>
+  <div class="tbl-wrap">
+    <table id="tbl-targets">
+      <thead>
+        <tr>
+          <th>Verdict</th>
+          <th>Opportunity</th>
+          <th>Agency</th>
+          <th>NAICS</th>
+          <th>Set-Aside</th>
+          <th>Score</th>
+          <th>Due</th>
+        </tr>
+      </thead>
+      <tbody id="body-targets"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- Forecast Radar -->
+  <h2>Forecast Radar — Expiring Contracts</h2>
+  <div class="tbl-wrap">
+    <table id="tbl-forecast">
+      <thead>
+        <tr>
+          <th>Agency</th>
+          <th>Contract</th>
+          <th>Incumbent</th>
+          <th>Value</th>
+          <th>Ends</th>
+          <th>Outreach By</th>
+          <th>NAICS</th>
+        </tr>
+      </thead>
+      <tbody id="body-forecast"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- Agency Scoreboard -->
+  <h2>Agency Scoreboard</h2>
+  <div class="scoreboard" id="scoreboard"></div>
+
+  <!-- No-Go Log -->
+  <h2>No-Go Log</h2>
+  <div class="tbl-wrap">
+    <table>
+      <thead>
+        <tr><th>Opportunity</th><th>Agency</th><th>Reason</th></tr>
+      </thead>
+      <tbody id="body-nogo"><tr><td colspan="3" class="empty">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+</div>
+
+<footer>
+  The Blackshear Group, LLC · UEI: ZNTMDN4Y3NN8 · CAGE: 885Z9 · Springfield, VA<br>
+  Pipeline data sourced from GovTribe. Scored by Claude AI. Updated daily at 07:00 EDT.
+</footer>
+
+<script>
+const $id = id => document.getElementById(id);
+
+function fmtDate(s) {
+  if (!s) return '—';
+  try {
+    const d = new Date(s);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch { return s.slice(0, 10); }
+}
+
+function daysLeft(s) {
+  if (!s) return null;
+  try {
+    return Math.round((new Date(s) - new Date()) / 86400000);
+  } catch { return null; }
+}
+
+function urgencyTag(due) {
+  const d = daysLeft(due);
+  if (d === null) return '';
+  if (d <= 3) return ` <span style="color:#f85149;font-weight:700">🚨 ${d}d</span>`;
+  if (d <= 7) return ` <span style="color:#d29922">⚡ ${d}d</span>`;
+  if (d <= 14) return ` <span style="color:#8b949e">⏳ ${d}d</span>`;
+  return '';
+}
+
+function fmtMoney(n) {
+  if (!n) return '—';
+  if (n >= 1e6) return '$' + (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return '$' + (n / 1e3).toFixed(0) + 'K';
+  return '$' + n;
+}
+
+function scoreColor(s) {
+  if (s >= 60) return '#3fb950';
+  if (s >= 35) return '#d29922';
+  return '#f85149';
+}
+
+function badge(verdict) {
+  const label = verdict === 'WATCH_TEAMING' ? 'TEAMING' : verdict;
+  return `<span class="badge badge-${verdict}">${label}</span>`;
+}
+
+function renderTargets(targets) {
+  const tbody = $id('body-targets');
+  if (!targets || !targets.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">No active targets today.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = targets.map(t => {
+    const teamTag = t.teaming_flag ? '<span class="tag tag-team">🤝 TEAMING</span>' : '';
+    const priorityTag = t.priority_agency ? '<span class="tag tag-priority">⭐ PRIORITY</span>' : '';
+    const nameCell = t.govtribe_url
+      ? `<a href="${t.govtribe_url}" target="_blank">${t.name}</a>`
+      : t.name;
+    const color = scoreColor(t.score);
+    const pct = Math.max(4, t.score);
+    return `<tr>
+      <td>${badge(t.verdict)}${teamTag}${priorityTag}</td>
+      <td>
+        ${nameCell}
+        ${t.reason_summary ? `<div class="reason">${t.reason_summary}</div>` : ''}
+        ${t.recommended_action ? `<div class="action">→ ${t.recommended_action}</div>` : ''}
+      </td>
+      <td style="white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis">${t.agency || '—'}</td>
+      <td style="font-size:.75rem;color:#8b949e">${t.naics || '—'}</td>
+      <td style="white-space:nowrap">${t.set_aside_type || '—'}</td>
+      <td>
+        <div class="score-bar">
+          <span style="font-weight:600;color:${color}">${t.score}</span>
+          <div class="bar"><div class="fill" style="width:${pct}%;background:${color}"></div></div>
+        </div>
+      </td>
+      <td style="white-space:nowrap">${fmtDate(t.due_date)}${urgencyTag(t.due_date)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderForecast(forecast) {
+  const tbody = $id('body-forecast');
+  if (!forecast || !forecast.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">No expiring contracts identified in the 90–540 day window.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = forecast.map(f => {
+    const nameCell = f.govtribe_url
+      ? `<a href="${f.govtribe_url}" target="_blank">${f.name}</a>`
+      : f.name;
+    return `<tr>
+      <td style="white-space:nowrap">${f.agency || '—'}</td>
+      <td>${nameCell}</td>
+      <td style="color:#8b949e">${f.incumbent || '—'}</td>
+      <td style="white-space:nowrap">${fmtMoney(f.current_value)}</td>
+      <td style="white-space:nowrap">${fmtDate(f.end_date)}</td>
+      <td style="white-space:nowrap;color:#58a6ff;font-weight:600">${fmtDate(f.action_date)}</td>
+      <td style="font-size:.75rem;color:#8b949e">${f.naics || '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderScoreboard(targets) {
+  const sb = $id('scoreboard');
+  const agencies = {};
+  (targets || []).forEach(t => {
+    const a = t.agency || 'Unknown Agency';
+    if (!agencies[a]) agencies[a] = { go: 0, watch: 0, teaming: 0 };
+    if (t.verdict === 'GO') agencies[a].go++;
+    else if (t.verdict === 'WATCH') agencies[a].watch++;
+    else if (t.verdict === 'WATCH_TEAMING') agencies[a].teaming++;
+  });
+
+  const PRIORITY = ['GSA Public Buildings Service', 'Department of State', 'Customs and Border Protection'];
+  const sorted = Object.entries(agencies).sort(([a], [b]) => {
+    const ai = PRIORITY.findIndex(p => a.includes(p.split(' ')[0]));
+    const bi = PRIORITY.findIndex(p => b.includes(p.split(' ')[0]));
+    if (ai !== bi) return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    return a.localeCompare(b);
+  });
+
+  if (!sorted.length) {
+    sb.innerHTML = '<p class="empty">No agency data available.</p>';
+    return;
+  }
+
+  sb.innerHTML = sorted.map(([name, counts]) => `
+    <div class="agency-card">
+      <h3>${name}</h3>
+      <div class="row"><span>🟢 Go</span><span class="val" style="color:#3fb950">${counts.go}</span></div>
+      <div class="row"><span>🟡 Watch</span><span class="val" style="color:#d29922">${counts.watch}</span></div>
+      <div class="row"><span>🤝 Teaming</span><span class="val" style="color:#a371f7">${counts.teaming}</span></div>
+      <div class="row"><span style="color:#8b949e">Total</span><span class="val">${counts.go + counts.watch + counts.teaming}</span></div>
+    </div>
+  `).join('');
+}
+
+function renderNoGo(no_go) {
+  const tbody = $id('body-nogo');
+  if (!no_go || !no_go.length) {
+    tbody.innerHTML = '<tr><td colspan="3" class="empty">No disqualified opportunities logged.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = no_go.slice(0, 50).map(n => `
+    <tr>
+      <td>${n.govtribe_url ? `<a href="${n.govtribe_url}" target="_blank">${n.name}</a>` : n.name}</td>
+      <td style="color:#8b949e;white-space:nowrap">${n.agency || '—'}</td>
+      <td style="color:#8b949e;font-size:.75rem">${n.kill_reason || n.reason_summary || '—'}</td>
+    </tr>
+  `).join('');
+}
+
+async function loadPipeline() {
+  try {
+    const resp = await fetch('./pipeline.json?t=' + Date.now());
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+
+    const s = data.scan_summary || {};
+    $id('cnt-go').textContent = s.go ?? '—';
+    $id('cnt-watch').textContent = s.watch ?? '—';
+    $id('cnt-teaming').textContent = s.watch_teaming ?? '—';
+    $id('cnt-nogo').textContent = s.no_go ?? '—';
+    $id('cnt-forecast').textContent = s.forecast ?? '—';
+
+    $id('generated-at').textContent = data.generated_at
+      ? 'Updated ' + fmtDate(data.generated_at) + ' ' + new Date(data.generated_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+      : '';
+
+    renderTargets(data.targets);
+    renderForecast(data.forecast);
+    renderScoreboard(data.targets);
+    renderNoGo(data.no_go);
+
+  } catch (err) {
+    console.error('Failed to load pipeline.json:', err);
+    $id('generated-at').textContent = 'Error loading data';
+    document.querySelectorAll('tbody').forEach(b => {
+      b.innerHTML = '<tr><td colspan="9" class="empty">Could not load pipeline data. Run scanner.py to generate.</td></tr>';
+    });
+  }
+}
+
+loadPipeline();
+</script>
+</body>
+</html>
