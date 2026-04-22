@@ -1,11 +1,40 @@
 """Score all opportunities and write pipeline.json."""
 import json
+import os
 import re
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent / '.env')
+
+import anthropic
+
 BASE = Path(r'C:\Users\jrman\.claude\projects\d--QuantDesk-GovTribe\b272b280-e072-4809-ae1e-82f623cae8a4\tool-results')
 TODAY = datetime.now(timezone.utc)
+
+TBG_PROFILE = """
+The Blackshear Group, LLC (TBG) — principal: Justin Mann, PE, PMP, CCM. Springfield, VA.
+
+WHAT TBG DOES:
+- Construction management oversight and advisory (not self-performing)
+- Program/project management support (PMO)
+- Project controls: schedule analysis, earned value management, PMIS
+- Federal facilities technical support and inspection advisory
+- Construction quality assurance oversight
+- Capital program management support
+7 years supporting WHS Construction Management and Technical Support Services at the Pentagon.
+
+WHAT TBG DOES NOT DO:
+- Cybersecurity, IT systems, software development, SETA for tech programs
+- Environmental science, hazmat, NEPA compliance, natural resources
+- Weapons systems engineering, defense acquisition, ordnance
+- Clinical, medical, or laboratory services
+- Self-performing construction trades (concrete, electrical, plumbing, HVAC)
+- Range operations, military training support
+- Staffing/HR management
+- Legal, financial audit, or accounting services
+"""
 
 ELIGIBLE_NAICS = {'561210', '561720', '541330', '541611', '236220'}
 # 541330/541611 are TBG's actual delivery NAICS (CM oversight/advisory) — same weight as facilities/janitorial
@@ -17,6 +46,82 @@ EXCLUDED_SA = {
     'Veteran-Owned Small Business', 'Economically Disadvantaged Woman-Owned Small Business',
     'Woman-Owned Small Business Sole Source', 'Woman-Owned Small Business',
 }
+
+def ai_scope_check(opps: list) -> dict:
+    """
+    Batch-evaluate opportunities for TBG scope fit using Claude.
+    Returns {govtribe_id: (is_relevant: bool, reason: str)}
+    Falls back to relevant=True if API key missing or call fails.
+    """
+    api_key = os.getenv('ANTHROPIC_API_KEY', '')
+    if not api_key:
+        return {o['id']: (True, 'No API key — manual review required') for o in opps}
+
+    client = anthropic.Anthropic(api_key=api_key)
+    def _clean(s: str) -> str:
+        """Strip characters that break pipe-delimited format."""
+        return re.sub(r'[\x00-\x1f\x7f|]', ' ', (s or ''))[:350]
+
+    # Only send to AI if there's enough description to evaluate
+    # Pass through without AI check if description is too short
+    needs_check = [o for o in opps if len(o.get('desc_text', '') or '') >= 80]
+    auto_pass   = [o for o in opps if len(o.get('desc_text', '') or '') < 80]
+
+    results = {o['id']: (True, 'No description — passed through') for o in auto_pass}
+
+    if not needs_check:
+        return results
+
+    lines = []
+    id_index = {}
+    for i, o in enumerate(needs_check):
+        tag = f'OPP{i+1:03d}'
+        id_index[tag] = o['id']
+        lines.append(
+            f"{tag} | {_clean(o['name'])} | {_clean(o.get('agency',''))} "
+            f"| NAICS {_clean(o.get('naics_name','') or o.get('naics',''))} "
+            f"| {_clean(o.get('desc_text',''))}"
+        )
+
+    prompt = f"""{TBG_PROFILE}
+
+Evaluate each opportunity. Mark relevant=true if TBG's credentials and experience apply.
+Default to TRUE if uncertain — only mark false for clear mismatches.
+
+RELEVANT for TBG: facilities management oversight, construction management support, PMO/project controls, building maintenance management, janitorial services program management, facility operations oversight, CM advisory, schedule/cost controls. TBG can manage subcontractors to deliver these services even if not self-performing.
+
+NOT RELEVANT: cybersecurity/IT, weapons/defense systems engineering, environmental science, clinical/medical, range operations, staffing/HR, financial audit, legal services.
+
+FORMAT — one pipe-delimited line per opportunity, no extra text:
+TAG|true|one sentence reason
+TAG|false|one sentence reason
+
+Opportunities:
+{chr(10).join(lines)}"""
+
+    try:
+        resp = client.messages.create(
+            model='claude-haiku-4-5-20251001',
+            max_tokens=2000,
+            messages=[{'role': 'user', 'content': prompt}],
+        )
+        results = {}
+        for line in resp.content[0].text.strip().splitlines():
+            parts = line.strip().split('|', 2)
+            if len(parts) == 3:
+                tag, verdict, reason = parts
+                tag = tag.strip()
+                if tag in id_index:
+                    results[id_index[tag]] = (verdict.strip().lower() == 'true', reason.strip())
+        # Any opp not returned by Claude → default relevant
+        for o in opps:
+            if o['id'] not in results:
+                results[o['id']] = (True, 'Not evaluated — manual review')
+        return results
+    except Exception as e:
+        print(f'  AI scope check failed: {e} — defaulting to relevant=True')
+        return {o['id']: (True, 'AI check error — manual review required') for o in opps}
+
 
 # Mandatory site visit / pre-proposal conference keywords
 MANDATORY_KEYWORDS = [
@@ -397,31 +502,79 @@ targets = []
 no_go_list = []
 site_visit_kills = 0
 
+# Stage 1: apply hard rule filters, collect survivors for AI check
+survivors = []
+hard_kills = []
 for o in all_opps:
     score, kill, bonding, sv_warning, sv_date, qa_date, presol_bonus = score_opp(o)
+    o['_score'] = score
+    o['_kill'] = kill
+    o['_bonding'] = bonding
+    o['_sv_warning'] = sv_warning
+    o['_sv_date'] = sv_date
+    o['_qa_date'] = qa_date
+    o['_presol_bonus'] = presol_bonus
+    if score is None:
+        hard_kills.append(o)
+    else:
+        survivors.append(o)
+
+# Stage 2: AI scope relevance check on all survivors in one batch call
+print(f'Running AI scope check on {len(survivors)} opportunities...')
+ai_results = ai_scope_check(survivors)
+ai_kills = 0
+
+for o in survivors:
+    is_relevant, ai_reason = ai_results.get(o['id'], (True, ''))
+    if not is_relevant:
+        ai_kills += 1
+        o['_kill'] = f'Out of scope: {ai_reason}'
+        hard_kills.append(o)
+        continue
+    o['_ai_reason'] = ai_reason
+
+print(f'  AI scope filter: {ai_kills} removed, {len(survivors) - ai_kills} passed')
+
+# Stage 3: score and classify survivors
+all_opps_to_score = [o for o in survivors if o.get('_ai_reason') is not None or ai_results.get(o['id'], (True,))[0]]
+
+for o in hard_kills:
+    kill = o.get('_kill', '')
+    sv_date = o.get('_sv_date', '')
     agency = o.get('agency', '')
     priority = any(x in agency.lower() for x in ['gsa', 'public buildings', 'state', 'customs', 'border'])
 
-    if score is None:
-        if 'site visit' in (kill or '').lower() or 'conference' in (kill or '').lower():
-            site_visit_kills += 1
-        no_go_list.append({
-            'id': o['id'], 'name': o['name'], 'verdict': 'NO-GO', 'score': 0,
-            'kill_reason': kill, 'reason_summary': kill, 'recommended_action': '',
-            'bonding_required': False, 'teaming_flag': False, 'priority_agency': priority,
-            'score_breakdown': {}, 'agency': agency, 'agency_url': o.get('agency_url', ''),
-            'opportunity_type': o.get('type', ''), 'set_aside_type': o.get('set_aside', ''),
-            'posted_date': o.get('posted', ''), 'due_date': o.get('due', ''),
-            'site_visit_date': sv_date, 'qa_rfi_date': '',
-            'govtribe_url': o.get('url', ''), 'naics': o.get('naics_name', ''), 'psc': o.get('psc', ''),
-        })
+    if 'site visit' in (kill or '').lower() or 'conference' in (kill or '').lower():
+        site_visit_kills += 1
+    no_go_list.append({
+        'id': o['id'], 'name': o['name'], 'verdict': 'NO-GO', 'score': 0,
+        'kill_reason': kill, 'reason_summary': kill, 'recommended_action': '',
+        'bonding_required': False, 'teaming_flag': False, 'priority_agency': priority,
+        'score_breakdown': {}, 'agency': agency, 'agency_url': o.get('agency_url', ''),
+        'opportunity_type': o.get('type', ''), 'set_aside_type': o.get('set_aside', ''),
+        'posted_date': o.get('posted', ''), 'due_date': o.get('due', ''),
+        'site_visit_date': sv_date, 'qa_rfi_date': '',
+        'govtribe_url': o.get('url', ''), 'naics': o.get('naics_name', ''), 'psc': o.get('psc', ''),
+    })
+
+for o in all_opps:
+    if o in hard_kills:
         continue
+    score, kill, bonding, sv_warning, sv_date, qa_date, presol_bonus = (
+        o['_score'], o['_kill'], o['_bonding'], o['_sv_warning'],
+        o['_sv_date'], o['_qa_date'], o['_presol_bonus'],
+    )
+    agency = o.get('agency', '')
+    priority = any(x in agency.lower() for x in ['gsa', 'public buildings', 'state', 'customs', 'border'])
+    ai_reason = o.get('_ai_reason', '')
 
     verdict = 'GO' if score >= 60 else ('WATCH_TEAMING' if bonding and score >= 35 else 'WATCH' if score >= 35 else 'NO-GO')
 
     reason = f'Score {score}/100. {agency[:45]}. Set-aside: {o.get("set_aside", "")}.'
+    if ai_reason:
+        reason += f' {ai_reason}'
     if presol_bonus:
-        reason += f' PRE-SOLICITATION — position now before RFP drops.'
+        reason += ' PRE-SOLICITATION — position now before RFP drops.'
     if bonding:
         reason += ' Construction scope — bonding required.'
     if sv_warning:
@@ -444,6 +597,7 @@ for o in all_opps:
         'bonding_required': bonding,
         'teaming_flag': (bonding and verdict == 'WATCH_TEAMING'),
         'presolicitation': presol_bonus > 0,
+        'ai_scope_note': ai_reason,
         'site_visit_warning': sv_warning or '',
         'site_visit_date': sv_date,
         'qa_rfi_date': qa_date,
@@ -488,6 +642,7 @@ pipeline = {
         'no_go': len(no_go_list),
         'forecast': len(forecast),
         'site_visit_kills': site_visit_kills,
+        'ai_scope_kills': ai_kills,
     },
     'targets': targets,
     'no_go': no_go_list,
