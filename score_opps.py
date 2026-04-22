@@ -8,7 +8,8 @@ BASE = Path(r'C:\Users\jrman\.claude\projects\d--QuantDesk-GovTribe\b272b280-e07
 TODAY = datetime.now(timezone.utc)
 
 ELIGIBLE_NAICS = {'561210', '561720', '541330', '541611', '236220'}
-PRIMARY_NAICS = {'561210', '561720', '236220'}
+# 541330/541611 are TBG's actual delivery NAICS (CM oversight/advisory) — same weight as facilities/janitorial
+PRIMARY_NAICS = {'561210', '561720', '236220', '541330', '541611'}
 EXCLUDED_SA = {
     '8(a) Sole Source', 'Competitive 8(a)', 'HUBZone Sole Source', 'HUBZone',
     'Service-Disabled Veteran-Owned Small Business Sole Source',
@@ -223,7 +224,7 @@ def fmt_iso(dt) -> str:
 
 
 def score_opp(o):
-    """Returns (score, kill_reason, bonding_required, site_visit_warning, site_visit_date, qa_rfi_date)."""
+    """Returns (score, kill_reason, bonding_required, site_visit_warning, site_visit_date, qa_rfi_date, presol_bonus)."""
     sa = o.get('set_aside', '')
     naics = o.get('naics', '')
     loc = (o.get('location', '') or '').lower()
@@ -234,13 +235,13 @@ def score_opp(o):
 
     # --- Hard filters ---
     if sa in EXCLUDED_SA:
-        return None, f'Ineligible set-aside: {sa}', False, None, '', ''
+        return None, f'Ineligible set-aside: {sa}', False, None, '', '', 0
 
     if naics and naics not in ELIGIBLE_NAICS:
-        return None, f'NAICS {naics} not in TBG codes', False, None, '', ''
+        return None, f'NAICS {naics} not in TBG codes', False, None, '', '', 0
 
     if dl < 10:
-        return None, f'Deadline too close: {dl} days remaining', False, None, '', ''
+        return None, f'Deadline too close: {dl} days remaining', False, None, '', '', 0
 
     # --- Mandatory site visit check ---
     site_visit_warning = None
@@ -261,7 +262,7 @@ def score_opp(o):
                 effective_days = (effective_date - TODAY).days
             kill = site_visit_kill_reason(effective_date, effective_days)
             if kill:
-                return None, kill, False, None, fmt_iso(effective_date), ''
+                return None, kill, False, None, fmt_iso(effective_date), '', 0
             if effective_days is not None and effective_days <= 7:
                 site_visit_warning = f'Mandatory site visit in {effective_days}d — register immediately'
             elif effective_days is None:
@@ -277,8 +278,11 @@ def score_opp(o):
 
     sa_score = {'Total Small Business': 20, 'Partial Small Business': 15, 'No Set-Aside Used': 10}.get(sa, 0)
 
-    if 'gsa' in agency or 'public buildings' in agency or 'general services' in agency:
-        ap = 15
+    # GSA PBS NCR is primary target — scores 20, same weight as NAICS match
+    if 'public buildings' in agency or ('gsa' in agency and 'public buildings' in agency):
+        ap = 20
+    elif 'gsa' in agency or 'general services' in agency:
+        ap = 17
     elif 'state' in agency and any(x in agency for x in ['acquisition', 'bureau', 'oaq']):
         ap = 13
     elif 'customs' in agency or 'border protection' in agency:
@@ -295,11 +299,18 @@ def score_opp(o):
 
     rt = 5 if dl >= 21 else 3 if dl >= 15 else 1
 
-    score = nm + sa_score + ap + 8 + geo_score + rt  # 8 = default past performance score
+    # Pre-solicitation bonus: Sources Sought / RFI / Industry Day = early positioning window
+    opp_type = (o.get('type', '') or '').lower()
+    presol_bonus = 8 if any(x in opp_type for x in [
+        'sources sought', 'request for information', 'pre-solicitation',
+        'special notice', 'industry day', 'rfi',
+    ]) else 0
+
+    score = nm + sa_score + ap + 8 + geo_score + rt + presol_bonus  # 8 = default past performance score
 
     bonding = naics == '236220' or any(x in (o.get('psc', '') or '') for x in ['Z1', 'Z2', 'Y1'])
 
-    return score, None, bonding, site_visit_warning, sv_date_str, qa_date_str
+    return score, None, bonding, site_visit_warning, sv_date_str, qa_date_str, presol_bonus
 
 
 def forecast_stage(end_date_str):
@@ -387,7 +398,7 @@ no_go_list = []
 site_visit_kills = 0
 
 for o in all_opps:
-    score, kill, bonding, sv_warning, sv_date, qa_date = score_opp(o)
+    score, kill, bonding, sv_warning, sv_date, qa_date, presol_bonus = score_opp(o)
     agency = o.get('agency', '')
     priority = any(x in agency.lower() for x in ['gsa', 'public buildings', 'state', 'customs', 'border'])
 
@@ -409,6 +420,8 @@ for o in all_opps:
     verdict = 'GO' if score >= 60 else ('WATCH_TEAMING' if bonding and score >= 35 else 'WATCH' if score >= 35 else 'NO-GO')
 
     reason = f'Score {score}/100. {agency[:45]}. Set-aside: {o.get("set_aside", "")}.'
+    if presol_bonus:
+        reason += f' PRE-SOLICITATION — position now before RFP drops.'
     if bonding:
         reason += ' Construction scope — bonding required.'
     if sv_warning:
@@ -430,6 +443,7 @@ for o in all_opps:
         'recommended_action': action,
         'bonding_required': bonding,
         'teaming_flag': (bonding and verdict == 'WATCH_TEAMING'),
+        'presolicitation': presol_bonus > 0,
         'site_visit_warning': sv_warning or '',
         'site_visit_date': sv_date,
         'qa_rfi_date': qa_date,

@@ -43,6 +43,7 @@
     .badge-WATCH { background: #3d2e00; color: #d29922; border: 1px solid #9e6a03; }
     .badge-WATCH_TEAMING { background: #2d1f63; color: #a371f7; border: 1px solid #6e40c9; }
     .badge-NO-GO { background: #3d0f0f; color: #f85149; border: 1px solid #da3633; }
+    .badge-PRESOL { background: #0d1f3c; color: #58a6ff; border: 1px solid #1f6feb; }
 
     a { color: #58a6ff; text-decoration: none; }
     a:hover { text-decoration: underline; }
@@ -215,6 +216,7 @@ function renderTargets(targets) {
   tbody.innerHTML = targets.map(t => {
     const teamTag = t.teaming_flag ? '<span class="tag tag-team">🤝 TEAMING</span>' : '';
     const priorityTag = t.priority_agency ? '<span class="tag tag-priority">⭐ PRIORITY</span>' : '';
+    const presolTag = t.presolicitation ? '<span class="badge badge-PRESOL" style="margin-left:.4rem;font-size:.65rem">PRE-SOL</span>' : '';
     const nameCell = t.govtribe_url
       ? `<a href="${t.govtribe_url}" target="_blank">${t.name}</a>`
       : t.name;
@@ -224,7 +226,7 @@ function renderTargets(targets) {
       ? `<div style="font-size:.7rem;color:#d29922;margin-top:.2rem">⚠ ${t.site_visit_warning}</div>`
       : '';
     return `<tr>
-      <td>${badge(t.verdict)}${teamTag}${priorityTag}</td>
+      <td>${badge(t.verdict)}${teamTag}${priorityTag}${presolTag}</td>
       <td>
         ${nameCell}
         ${t.reason_summary ? `<div class="reason">${t.reason_summary}</div>` : ''}
